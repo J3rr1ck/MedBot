@@ -1,5 +1,7 @@
 {
   "name": "MediAssist AI",
   "description": "An AI-powered medical symptom checker and preliminary diagnosis assistant. Uses Gemini 2.5 Flash for rapid analysis of symptoms and visual inputs.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

@@ -6,7 +6,9 @@ import {
   LucideChevronLeft, 
   LucideChevronRight, 
   LucideTrash2,
-  LucideUpload
+  LucideUpload,
+  LucideCamera,
+  LucideX
 } from 'lucide-react';
 
 interface SymptomFormProps {
@@ -17,7 +19,11 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
   const [symptoms, setSymptoms] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Handle active index bounds when images are removed
   useEffect(() => {
@@ -27,6 +33,50 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
       setActiveIndex(selectedImages.length - 1);
     }
   }, [selectedImages.length, activeIndex]);
+
+  // Camera handling effect
+  useEffect(() => {
+    let mounted = true;
+
+    const initCamera = async () => {
+      if (isCameraOpen) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment' } 
+          });
+          
+          if (mounted) {
+            streamRef.current = stream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
+            }
+          } else {
+            // Clean up if unmounted during load
+            stream.getTracks().forEach(track => track.stop());
+          }
+        } catch (err) {
+          console.error("Error accessing camera:", err);
+          alert("Could not access camera. Please ensure you have granted permissions.");
+          if (mounted) setIsCameraOpen(false);
+        }
+      } else {
+        // Cleanup stream when camera closes
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+      }
+    };
+
+    initCamera();
+
+    return () => {
+      mounted = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [isCameraOpen]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -57,8 +107,9 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
 
     Promise.all(readers).then(newBase64Images => {
         setSelectedImages(prev => [...prev, ...newBase64Images]);
-        // Optional: Jump to the first new image
-        // setActiveIndex(selectedImages.length); 
+        if (selectedImages.length === 0) {
+           setActiveIndex(0);
+        }
     });
 
     // Reset input to allow selecting the same file again if needed
@@ -77,6 +128,41 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
 
   const prevImage = () => {
     setActiveIndex((prev) => (prev - 1 + selectedImages.length) % selectedImages.length);
+  };
+
+  const startCamera = () => {
+    if (selectedImages.length >= 5) {
+      alert("Max 5 images allowed.");
+      return;
+    }
+    setIsCameraOpen(true);
+  };
+
+  const stopCamera = () => {
+    setIsCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        
+        if (selectedImages.length < 5) {
+          setSelectedImages(prev => {
+            const newState = [...prev, dataUrl];
+            // Automatically view the new image
+            setTimeout(() => setActiveIndex(newState.length - 1), 0);
+            return newState;
+          });
+        }
+        stopCamera();
+      }
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -113,7 +199,7 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
         </div>
       </div>
 
-      {/* Image Upload Section */}
+      {/* Image Upload / Camera Section */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <label className="block text-base font-semibold text-slate-900">
@@ -124,17 +210,63 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
           </span>
         </div>
         
-        {selectedImages.length === 0 ? (
-          <div 
-            onClick={triggerFileInput}
-            className="border-2 border-dashed border-slate-300 rounded-xl h-48 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50/50 hover:border-blue-400 transition-all duration-300 group relative overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-gradient-to-br from-transparent to-slate-50 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <div className="w-14 h-14 bg-white rounded-full shadow-sm border border-slate-200 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:border-blue-200 transition-all relative z-10">
-              <LucideUpload className="text-slate-400 group-hover:text-blue-500" size={24} />
+        {isCameraOpen ? (
+          <div className="relative bg-black rounded-2xl overflow-hidden h-96 flex flex-col items-center justify-center animate-fade-in shadow-lg">
+            <video 
+              ref={videoRef} 
+              className="absolute inset-0 w-full h-full object-cover" 
+              autoPlay 
+              playsInline 
+              muted 
+            />
+            
+            {/* Camera Controls Overlay */}
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-6 flex items-center justify-center gap-8 z-10">
+              <button 
+                type="button" 
+                onClick={stopCamera} 
+                className="p-4 rounded-full bg-white/10 text-white hover:bg-white/20 backdrop-blur-sm transition-all"
+                title="Cancel"
+              >
+                <LucideX size={24} />
+              </button>
+              
+              <button 
+                type="button" 
+                onClick={capturePhoto} 
+                className="p-1.5 rounded-full border-4 border-white/30 hover:border-white/50 transition-all hover:scale-105 active:scale-95"
+              >
+                <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-lg">
+                  <div className="w-14 h-14 rounded-full bg-white border-2 border-slate-300"></div>
+                </div>
+              </button>
+              
+              <div className="w-14"></div> {/* Spacer to balance Cancel button */}
             </div>
-            <p className="text-sm font-semibold text-slate-700 group-hover:text-blue-700 relative z-10">Click to upload photos</p>
-            <p className="text-xs text-slate-500 mt-1 relative z-10">JPG, PNG up to 5MB</p>
+          </div>
+        ) : selectedImages.length === 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 h-48">
+            <div 
+              onClick={triggerFileInput}
+              className="border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50/50 hover:border-blue-400 transition-all duration-300 group relative overflow-hidden"
+            >
+              <div className="w-12 h-12 bg-white rounded-full shadow-sm border border-slate-200 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:border-blue-200 transition-all">
+                <LucideUpload className="text-slate-400 group-hover:text-blue-500" size={20} />
+              </div>
+              <p className="text-sm font-semibold text-slate-700 group-hover:text-blue-700">Upload Photo</p>
+              <p className="text-xs text-slate-500 mt-1">JPG, PNG up to 5MB</p>
+            </div>
+
+            <div 
+              onClick={startCamera}
+              className="border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50/50 hover:border-blue-400 transition-all duration-300 group relative overflow-hidden"
+            >
+              <div className="w-12 h-12 bg-white rounded-full shadow-sm border border-slate-200 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:border-blue-200 transition-all">
+                <LucideCamera className="text-slate-400 group-hover:text-blue-500" size={20} />
+              </div>
+              <p className="text-sm font-semibold text-slate-700 group-hover:text-blue-700">Take Photo</p>
+              <p className="text-xs text-slate-500 mt-1">Use device camera</p>
+            </div>
           </div>
         ) : (
           <div className="space-y-4 animate-fade-in">
@@ -183,7 +315,7 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
             </div>
 
             {/* Thumbnail Strip */}
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide items-center">
               {selectedImages.map((img, idx) => (
                 <button
                   key={idx}
@@ -204,14 +336,27 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit }) => {
               ))}
               
               {selectedImages.length < 5 && (
-                <button
-                  type="button"
-                  onClick={triggerFileInput}
-                  className="flex-shrink-0 w-20 h-20 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50 transition-all"
-                  title="Add another image"
-                >
-                  <LucidePlus size={24} />
-                </button>
+                <>
+                  <div className="w-px h-12 bg-slate-200 mx-1"></div>
+                  
+                  <button
+                    type="button"
+                    onClick={triggerFileInput}
+                    className="flex-shrink-0 w-12 h-12 rounded-full border border-slate-300 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50 transition-all bg-white"
+                    title="Upload another image"
+                  >
+                    <LucideUpload size={20} />
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={startCamera}
+                    className="flex-shrink-0 w-12 h-12 rounded-full border border-slate-300 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50 transition-all bg-white"
+                    title="Take another photo"
+                  >
+                    <LucideCamera size={20} />
+                  </button>
+                </>
               )}
             </div>
           </div>
